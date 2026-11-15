@@ -24,6 +24,8 @@ struct Fixture {
 	int maximum[16] {};
 	bool copied[16] {};
 	unsigned writes {0}, protections {0}, failProtect {0}, failWrite {0}, failRestores {0};
+	unsigned corruptWrite {0};
+	bool failStringRead {false};
 
 	template<typename T>
 	void put(size_t offset, T value) { memcpy(backing.data() + offset, &value, sizeof(value)); }
@@ -87,6 +89,9 @@ struct Fixture {
 	static int read(void *context, uint64_t address, void *data, size_t size) {
 		auto &self = *static_cast<Fixture *>(context);
 		if (!self.range(address, size)) return 1;
+		if (self.failStringRead && address <= Base + NameOffset &&
+			size > Base + NameOffset - address)
+			return 1;
 		memcpy(data, self.local.data() + (address - Base), size);
 		return 0;
 	}
@@ -130,6 +135,8 @@ struct Fixture {
 			self.local[offset] = static_cast<const uint8_t *>(data)[i];
 			if (!self.copied[page]) self.backing[offset] = self.local[offset];
 		}
+		if (self.writes == self.corruptWrite && length)
+			self.local[static_cast<size_t>(address - Base)] ^= 0x80;
 		return fail ? 1 : 0;
 	}
 
@@ -195,7 +202,7 @@ void legacyTableAndPlainX64() {
 }
 
 void rejectAmbiguousOrMalformedImages() {
-	for (unsigned scenario = 0; scenario < 7; ++scenario) {
+	for (unsigned scenario = 0; scenario < 8; ++scenario) {
 		Fixture fixture;
 		switch (scenario) {
 			case 0: fixture.bytes(0x5700, Original, sizeof(Original)); break;
@@ -205,6 +212,10 @@ void rejectAmbiguousOrMalformedImages() {
 			case 4: fixture.put<uint64_t>(232, UINT64_MAX); break;
 			case 5: fixture.put<uint32_t>(0x418, 0xFFFFFFF0); break;
 			case 6: fixture.bytes(0x900, ImagePath, sizeof(ImagePath)); break;
+			case 7:
+				memset(fixture.backing.data() + NameOffset, 0, sizeof(Original));
+				fixture.bytes(0x7000 - sizeof(Original), Original, sizeof(Original));
+				break;
 		}
 		fixture.reset();
 		auto clean = fixture.backing;
@@ -216,7 +227,7 @@ void rejectAmbiguousOrMalformedImages() {
 }
 
 void transactionFailures() {
-	for (unsigned scenario = 0; scenario < 4; ++scenario) {
+	for (unsigned scenario = 0; scenario < 5; ++scenario) {
 		Fixture fixture;
 		auto clean = fixture.backing;
 		switch (scenario) {
@@ -224,11 +235,21 @@ void transactionFailures() {
 			case 1: fixture.failWrite = 1; break;
 			case 2: fixture.failWrite = 2; break;
 			case 3: fixture.failRestores = 2; break;
+			case 4: fixture.corruptWrite = 1; break;
 		}
 		assert(apply(fixture, request(Brand, sizeof(Brand), true)) == CpuNamePatch::Result::Failed);
 		assert(fixture.local == clean && fixture.backing == clean);
 		fixture.restored();
 	}
+}
+
+void unreadableSourceIsSkipped() {
+	Fixture fixture;
+	auto clean = fixture.backing;
+	fixture.failStringRead = true;
+	assert(apply(fixture, request()) == CpuNamePatch::Result::Unmatched);
+	assert(fixture.writes == 0 && fixture.protections == 0);
+	assert(fixture.local == clean && fixture.backing == clean);
 }
 
 void coreCountAndReadOnlyMaximum() {
@@ -249,6 +270,7 @@ int main() {
 	legacyTableAndPlainX64();
 	rejectAmbiguousOrMalformedImages();
 	transactionFailures();
+	unreadableSourceIsSkipped();
 	coreCountAndReadOnlyMaximum();
 	std::puts("CPU name private-page regression tests passed");
 }

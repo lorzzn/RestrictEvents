@@ -5,6 +5,7 @@
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 #include <sys/mman.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <dlfcn.h>
 #include <cassert>
@@ -17,6 +18,10 @@ int readCurrent(void *, uint64_t address, void *data, size_t size) {
 	mach_vm_size_t copied = 0;
 	auto result = mach_vm_read_overwrite(mach_task_self(), address, size,
 		reinterpret_cast<mach_vm_address_t>(data), &copied);
+	if (result != KERN_SUCCESS || copied != size)
+		std::fprintf(stderr, "Mach read failed at 0x%llx size %zu, result %d, copied %llu\n",
+			static_cast<unsigned long long>(address), size, result,
+			static_cast<unsigned long long>(copied));
 	return result == KERN_SUCCESS && copied == size ? 0 : 1;
 }
 
@@ -93,7 +98,7 @@ void realPrivateMapping() {
 	std::puts("Mach VM cross-page private writes preserve file, other mapping and original protections");
 }
 
-void runningCacheLayout() {
+void runningCacheLayout(bool patchPrivate) {
 	using CacheRange = const void *(*)(size_t *);
 	auto cacheRange = reinterpret_cast<CacheRange>(dlsym(RTLD_DEFAULT, "_dyld_get_shared_cache_range"));
 	assert(cacheRange);
@@ -107,14 +112,56 @@ void runningCacheLayout() {
 	static constexpr char original[] = "\0Dual-Core Intel Core i5";
 	static constexpr char brand[] = "\0AMD Athlon PRO 300U w/ Radeon Vega Mobile Gfx  ";
 	CpuNamePatch::Request request {original, sizeof(original), brand, sizeof(brand), nullptr, 0, nullptr, 0};
-	assert(CpuNamePatch::plan(memory, work, request));
+	if (!CpuNamePatch::plan(memory, work, request)) {
+		std::fprintf(stderr, "Cache plan unavailable, reads %zu bytes %zu\n", work.reads, work.bytes);
+		std::exit(1);
+	}
 	std::printf("Running cache AppleSystemInfo parsed, cstring size %llu, planned writes %zu (read-only inspection)\n",
 		static_cast<unsigned long long>(work.strings.size), work.siteCount);
+	if (!patchPrivate) return;
+
+	// The installed driver may already have substituted the brand. Locate that
+	// string without changing a kernel hook or any system file.
+	uint64_t address = 0;
+	const char *current = work.siteCount ? original : brand;
+	size_t currentSize = work.siteCount ? sizeof(original) : sizeof(brand);
+	assert(CpuNamePatch::scan(memory, work, work.strings, current, currentSize, address) && address);
+	uint8_t header[32], mapping[32], before[sizeof(brand)], after[sizeof(brand)];
+	assert(readCurrent(nullptr, base, header, sizeof(header)) == 0);
+	uint64_t fileOffset = 0;
+	bool found = false;
+	for (uint32_t i = 0; i < CpuNamePatch::word(header + 20); ++i) {
+		assert(readCurrent(nullptr, base + CpuNamePatch::word(header + 16) + i * 32,
+			mapping, sizeof(mapping)) == 0);
+		auto start = CpuNamePatch::wide(mapping);
+		CpuNamePatch::Range range {start + slide, CpuNamePatch::wide(mapping + 8)};
+		if (range.contains(address, sizeof(before))) {
+			fileOffset = CpuNamePatch::wide(mapping + 16) + address - range.address;
+			found = true;
+		}
+	}
+	assert(found);
+	const char *path =
+		"/System/Volumes/Preboot/Cryptexes/OS/System/Library/dyld/dyld_shared_cache_x86_64h";
+	int fd = open(path, O_RDONLY);
+	assert(fd >= 0);
+	assert(pread(fd, before, sizeof(before), fileOffset) == static_cast<ssize_t>(sizeof(before)));
+	static constexpr char trial[] = "\0AMD Athlon PRO 300U COW verification";
+	CpuNamePatch::Request trialRequest {current, currentSize, trial, sizeof(trial), nullptr, 0, nullptr, 0};
+	CpuNamePatch::Workspace privateWork {};
+	assert(CpuNamePatch::apply(memory, base, trialRequest, privateWork) == CpuNamePatch::Result::Applied);
+	assert(readCurrent(nullptr, address, after, sizeof(trial)) == 0);
+	assert(memcmp(after, trial, sizeof(trial)) == 0);
+	assert(pread(fd, after, sizeof(after), fileOffset) == static_cast<ssize_t>(sizeof(after)));
+	assert(memcmp(before, after, sizeof(before)) == 0);
+	close(fd);
+	std::puts("Running shared-region COW patch verified, backing cache bytes preserved");
 }
 }
 
 int main(int argc, char **argv) {
 	realPrivateMapping();
-	if (argc == 2 && strcmp(argv[1], "--inspect-running-cache") == 0)
-		runningCacheLayout();
+	if (argc == 2 && (strcmp(argv[1], "--inspect-running-cache") == 0 ||
+		strcmp(argv[1], "--patch-running-cache") == 0))
+		runningCacheLayout(strcmp(argv[1], "--patch-running-cache") == 0);
 }

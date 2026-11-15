@@ -3,7 +3,8 @@
 The portable suite runs the production cache parser and page transaction.
 It checks private replacement, unchanged backing bytes, cross-page names,
 image scoping, legacy and modern image tables, idempotence, malformed input,
-partial-write rollback and restoration of current and maximum protections.
+unreadable source pages, partial-write/readback rollback and restoration of
+current and maximum protections.
 The VM adapter models the boundary of the kernel VM operations.
 
 Run with Clang or GCC and assertions enabled.
@@ -26,6 +27,11 @@ c++ -std=c++14 -Wall -Wextra -Werror Tests/NativeVmTests.cpp -o /tmp/cpu-name-vm
 OS cache for the AMD Athlon PRO 300U diagnosis. It requires that cache to contain
 the original dual-core i5 name or the diagnosed replacement. The generic VM
 test above has no CPU model requirement.
+
+On the diagnosed macOS 15 Athlon machine, `--patch-running-cache` also writes a
+temporary test name into this test process's private AppleSystemInfo mapping,
+then verifies that the backing cache bytes retain their original contents.
+The process exits after verification.
 
 These checks do not exercise the installed kernel hook, code-signing rules of
 individual system applications, or cache eviction during sustained use.

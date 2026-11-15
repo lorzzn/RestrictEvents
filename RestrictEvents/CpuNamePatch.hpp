@@ -1,6 +1,6 @@
 //
-// CPU name discovery and private-page writes. No file-backed page is writable
-// through this interface. The kernel adapter supplies current-task VM operations.
+// CPU name discovery and writes to private dyld cache pages.
+// The kernel adapter supplies current-task VM operations.
 //
 #ifndef CPU_NAME_PATCH_HPP
 #define CPU_NAME_PATCH_HPP
