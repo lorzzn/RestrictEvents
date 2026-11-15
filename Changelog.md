@@ -1,5 +1,10 @@
 RestrictEvents Changelog
 ========================
+#### v1.1.7 CPU name COW fork
+- Apply CPU brand and core-count patches to private process mappings on macOS 11 and newer.
+- Keep CPU naming out of shared cache validation buffers to avoid compressed-page hash mismatches.
+- Verify writes and restore original bytes and page protections on transaction failure.
+
 #### v1.1.6
 - Added constants for macOS 26 support
 

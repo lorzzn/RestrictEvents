@@ -18,6 +18,14 @@ jobs:
       JOB_TYPE: BUILD
     steps:
       - uses: actions/checkout@v4
+      - name: CPU name regression tests
+        run: |
+          c++ -std=c++14 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer Tests/CpuNamePatchTests.cpp -o /tmp/cpu-name-tests
+          /tmp/cpu-name-tests
+          if [ "$(uname -m)" = x86_64 ]; then
+            c++ -std=c++14 -Wall -Wextra -Werror Tests/NativeVmTests.cpp -o /tmp/cpu-name-vm-tests
+            /tmp/cpu-name-vm-tests
+          fi
       - uses: actions/checkout@v4
         with:
           repository: acidanthera/MacKernelSDK

@@ -15,6 +15,7 @@
 
 #include "SoftwareUpdate.hpp"
 #include "vnode_types.hpp"
+#include "CpuNamePatch.hpp"
 
 extern "C" {
 #include <i386/cpuid.h>
@@ -149,7 +150,9 @@ struct RestrictEventsPolicy {
 					}
 				}
 
-				if (cpuReplSize > 0) {
+				// Modern caches are patched in the current task's private mapping.
+				// Mutating this validation buffer corrupts APFS compressed-page hashes.
+				if (cpuReplSize > 0 && getKernelVersion() < KernelVersion::BigSur) {
 					if (UNLIKELY(KernelPatcher::findAndReplace(const_cast<void *>(data), size, cpuFindPatch, cpuFindSize, cpuReplPatch, cpuReplSize))) {
 						DBGLOG("rev", "patched %s in AppleSystemInfo", reinterpret_cast<const char *>(cpuFindPatch + 1));
 						return;
@@ -489,6 +492,7 @@ static RestrictEventsPolicy restrictEventsPolicy;
 
 void rerouteHvVmm(KernelPatcher &patcher);
 void reroutef16c(KernelPatcher &patcher);
+void initCpuNamePatcher(KernelPatcher &patcher, const CpuNamePatch::Request &request);
 
 PluginConfiguration ADDPR(config) {
 	xStringify(PRODUCT_NAME),
@@ -547,7 +551,17 @@ PluginConfiguration ADDPR(config) {
 				(getKernelVersion() == KernelVersion::BigSur && getKernelMinorVersion() >= 4))) {
 				lilu.onPatcherLoadForce([](void *user, KernelPatcher &patcher) {
 					if ((lilu.getRunMode() & LiluAPI::RunningNormal) != 0) {
-						if (needsCpuNamePatch) RestrictEventsPolicy::calculatePatchedBrandString();
+						if (needsCpuNamePatch) {
+							RestrictEventsPolicy::calculatePatchedBrandString();
+							if (getKernelVersion() >= KernelVersion::BigSur) {
+								CpuNamePatch::Request request {
+									cpuFindPatch, cpuFindSize, cpuReplPatch, cpuReplSize,
+									needsUnlockCoreCount ? findUnlockCoreCount : nullptr,
+									sizeof(findUnlockCoreCount), replUnlockCoreCount, sizeof(replUnlockCoreCount)
+								};
+								initCpuNamePatcher(patcher, request);
+							}
+						}
 						KernelPatcher::RouteRequest csRoute =
 						getKernelVersion() >= KernelVersion::BigSur ?
 						KernelPatcher::RouteRequest("_cs_validate_page", RestrictEventsPolicy::csValidatePageBigSur, orgCsValidateFunc) :

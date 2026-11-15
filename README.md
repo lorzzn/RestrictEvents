@@ -1,6 +1,15 @@
 RestrictEvents
 ==============
 
+This fork repairs CPU naming on compressed dyld caches. On macOS 11 and newer,
+CPU patches use the current process's private copy-on-write pages after its
+shared region is mapped. CPU naming options are documented below.
+
+The fork is under validation. A successful build and VM regression suite still
+require an affected-machine reboot and sustained crash-log checks before a
+runtime fix can be confirmed. See [repair notes](docs/superpowers/plans/2026-11-15-cpu-name-private-pages.md)
+for the diagnosis, scope and verification status.
+
 [![Build Status](https://github.com/acidanthera/RestrictEvents/actions/workflows/main.yml/badge.svg?branch=master)](https://github.com/acidanthera/RestrictEvents/actions) [![Scan Status](https://scan.coverity.com/projects/22252/badge.svg?flat=1)](https://scan.coverity.com/projects/22252)
 
 [Lilu](https://github.com/acidanthera/Lilu) Kernel extension for blocking unwanted processes causing compatibility issues on different hardware and unlocking the support for certain features restricted to other hardware. The list of blocks currently includes:
