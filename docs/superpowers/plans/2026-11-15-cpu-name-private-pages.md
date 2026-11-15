@@ -47,6 +47,8 @@ Verification on November 15, 2026
   string, so the planner correctly produced zero additional writes.
 - Debug and Release builds and both Clang static analysis configurations passed
   in [CI run 43692573054](https://github.com/lorzzn/RestrictEvents/actions/runs/43692573054).
+  The expanded regression suite and the same build/analysis jobs also passed in
+  [CI run 43693706307](https://github.com/lorzzn/RestrictEvents/actions/runs/43693706307).
 - A subsequent real-cache probe failed while reading that string section, before
   any CPU write. Mach reported KERN_INVALID_ADDRESS at `0x7ff8293c2754`.
   At 16:08:14 and 16:09:38 +0800, the kernel logged the same compressed-block
